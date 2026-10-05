@@ -19,6 +19,10 @@ import 'updater.dart';
 /// by sending: POST http://127.0.0.1:47823/say  {"app": "...", "text": "..."}
 const agentPort = 47823;
 
+/// Windows/macOS/Linux get the floating desktop window and global hotkey;
+/// Android/iOS run Aero as a normal full-screen app.
+final bool isDesktop = !(Platform.isAndroid || Platform.isIOS);
+
 /// Errors that escape normal handling (often from plugins) land here: they
 /// are written to a log file and shown in the bubble instead of crashing.
 final ValueNotifier<String?> lastError = ValueNotifier(null);
@@ -52,6 +56,10 @@ Future<void> main() async {
     _recordError(error, stack);
     return true; // handled: keep the assistant running
   };
+  if (!isDesktop) {
+    runApp(const AgentApp());
+    return;
+  }
   await windowManager.ensureInitialized();
   await hotKeyManager.unregisterAll();
   const options = WindowOptions(
@@ -77,8 +85,8 @@ class AgentApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       colorSchemeSeed: const Color(0xFF1D4ED8),
-      scaffoldBackgroundColor: Colors.transparent,
-      canvasColor: Colors.transparent,
+      scaffoldBackgroundColor: isDesktop ? Colors.transparent : null,
+      canvasColor: isDesktop ? Colors.transparent : null,
     ),
     home: const FloatingAgent(),
   );
@@ -116,7 +124,7 @@ class _FloatingAgentState extends State<FloatingAgent>
   SharedPreferences? _prefs;
   final List<Map<String, dynamic>> _todos = [];
   String _serverStatus = 'starting';
-  bool _panelOpen = false;
+  bool _panelOpen = !isDesktop;
   final List<String> _commandQueue = [];
   final List<(bool, String)> _chat = [];
   final TextEditingController _input = TextEditingController();
@@ -133,6 +141,7 @@ class _FloatingAgentState extends State<FloatingAgent>
 
   /// Grows/shrinks the window upward so the agent stays where you put him.
   Future<void> _togglePanel() async {
+    if (!isDesktop) return; // the panel is the whole screen on phones
     final open = !_panelOpen;
     final b = await windowManager.getBounds();
     final size = open ? _big : _small;
@@ -285,6 +294,7 @@ class _FloatingAgentState extends State<FloatingAgent>
   );
 
   Future<void> _registerHotkey() async {
+    if (!isDesktop) return;
     try {
       await hotKeyManager.register(
         _summonKey,
@@ -311,8 +321,10 @@ class _FloatingAgentState extends State<FloatingAgent>
 
   /// Brings the agent back on screen and greets with a quick status line.
   Future<void> _summon({String? reason}) async {
-    await windowManager.show();
-    await windowManager.setAlwaysOnTop(true);
+    if (isDesktop) {
+      await windowManager.show();
+      await windowManager.setAlwaysOnTop(true);
+    }
     final s = _status;
     var line = _greetings[_greet++ % _greetings.length];
     if (_driveSyncLive && s != null) {
@@ -634,7 +646,7 @@ class _FloatingAgentState extends State<FloatingAgent>
           : Duration(minutes: n);
       final what = text.substring(text.length - remind.group(3)!.length);
       Timer(d, () async {
-        await windowManager.show();
+        if (isDesktop) await windowManager.show();
         await _show(AgentMessage('Reminder', 'Hey! Time to $what.'));
       });
       await _say(
@@ -1056,7 +1068,7 @@ class _FloatingAgentState extends State<FloatingAgent>
 
   Future<void> _dismiss() async {
     await _voice(_tts.stop);
-    await windowManager.hide();
+    if (isDesktop) await windowManager.hide();
   }
 
   Future<void> _show(AgentMessage m) async {
@@ -1102,9 +1114,13 @@ class _FloatingAgentState extends State<FloatingAgent>
     } else if (choice == 'hide') {
       await _dismiss();
     } else if (choice == 'quit') {
-      await hotKeyManager.unregisterAll();
       await _server?.close(force: true);
-      await windowManager.close();
+      if (isDesktop) {
+        await hotKeyManager.unregisterAll();
+        await windowManager.close();
+      } else {
+        exit(0);
+      }
     }
   }
 
@@ -1198,7 +1214,7 @@ class _FloatingAgentState extends State<FloatingAgent>
                 ),
                 // Drag him anywhere; tap to repeat; right-click for the menu.
                 GestureDetector(
-                  onPanStart: (_) => windowManager.startDragging(),
+                  onPanStart: isDesktop ? (_) => windowManager.startDragging() : null,
                   onTap: _togglePanel,
                   onDoubleTap: () {
                     final last = _last;
