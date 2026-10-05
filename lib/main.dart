@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'claude.dart';
 import 'understand.dart';
 import 'updater.dart';
 
@@ -325,7 +326,7 @@ class _FloatingAgentState extends State<FloatingAgent>
   }
 
   static const _help =
-      'Tap the mic or type. I can: time, date, remind me in 10 min to <x>, '
+      'Tap the mic or type. I can: ask claude <question>, plan my list, time, date, remind me in 10 min to <x>, '
       'add <task> [30 min], list, done <n>, pending, note <text>, notes, '
       'open <site or app>, security, virus scan, status, mute, hide. '
       'With DriveSync open: backup, maintain, scan, storage, daily 9pm.';
@@ -678,6 +679,37 @@ class _FloatingAgentState extends State<FloatingAgent>
       }
       return true;
     }
+    final key = RegExp(
+      r'^(?:set )?claude (?:api )?key\s+(\S+)$',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (key != null) {
+      final k = key.group(1)!.trim();
+      if (!k.startsWith('sk-ant-')) {
+        await _say(
+          'That does not look like a Claude API key (they start with sk-ant-).',
+        );
+      } else {
+        await _prefs?.setString('claudeKey', k);
+        await _say(
+          'Saved your Claude key on this PC. Now try: ask claude what should I do first today?',
+        );
+      }
+      return true;
+    }
+    final ask = RegExp(
+      r'^(?:ask claude|claude)[,:]?\s+(.+)$',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(text);
+    if (ask != null) {
+      await _askClaude(ask.group(1)!);
+      return true;
+    }
+    if (lower == 'plan my list') {
+      await _planWithClaude();
+      return true;
+    }
     final add = RegExp(
       r'^(?:add|todo)\s+(.+?)(?:\s+(\d+)\s*(?:m|min|mins|minutes))?$',
       caseSensitive: false,
@@ -857,9 +889,7 @@ class _FloatingAgentState extends State<FloatingAgent>
       await _dismiss();
     } else if (lower == 'mute') {
       setState(() => _muted = true);
-      await _show(
-        AgentMessage('Aero', 'Muted. I will only show bubbles.'),
-      );
+      await _show(AgentMessage('Aero', 'Muted. I will only show bubbles.'));
     } else if (lower == 'unmute') {
       setState(() => _muted = false);
       await _show(AgentMessage('Aero', "I'm back with my voice!"));
@@ -881,8 +911,85 @@ class _FloatingAgentState extends State<FloatingAgent>
     }
   }
 
+  Claude? get _claude {
+    final k = _prefs?.getString('claudeKey');
+    return k == null ? null : Claude(k);
+  }
+
+  static const _needKey =
+      'To use Claude, get an API key at console.anthropic.com, then type: '
+      'claude key sk-ant-... (it stays on this PC).';
+
+  bool _thinking = false;
+
+  Future<void> _askClaude(String question) async {
+    final c = _claude;
+    if (c == null) {
+      await _say(_needKey);
+      return;
+    }
+    if (_thinking) return;
+    setState(() => _thinking = true);
+    await _show(AgentMessage('Aero', 'Asking Claude…'));
+    try {
+      // Recent conversation gives Claude context; the question is last.
+      final history = [..._chat.reversed.take(10).toList().reversed];
+      if (history.isEmpty || history.last.$2 != question) {
+        history.add((true, question));
+      }
+      final reply = await c.chat(history);
+      await _show(AgentMessage('Claude', reply));
+    } finally {
+      if (mounted) setState(() => _thinking = false);
+    }
+  }
+
+  Future<void> _planWithClaude() async {
+    final c = _claude;
+    if (c == null) {
+      await _say(_needKey);
+      return;
+    }
+    final open = _openTodos;
+    if (open.isEmpty) {
+      await _say('Your to-do list is empty, nothing to plan.');
+      return;
+    }
+    await _say('Asking Claude to plan your ${open.length} tasks…');
+    final plan = await c.plan([for (final t in open) '${t['title']}']);
+    if (plan == null) {
+      await _say("Claude couldn't make a plan right now. Try again in a bit.");
+      return;
+    }
+    plan.minutes.forEach((n, mins) {
+      if (n >= 1 && n <= open.length) open[n - 1]['minutes'] = mins;
+    });
+    final ordered = [
+      for (final n in plan.order)
+        if (n >= 1 && n <= open.length) open[n - 1],
+    ];
+    if (ordered.length == open.length) {
+      _todos
+        ..removeWhere((t) => t['done'] != true)
+        ..insertAll(0, ordered);
+    }
+    _saveTodos();
+    final total = open.fold<int>(
+      0,
+      (a, t) => a + ((t['minutes'] as num?)?.toInt() ?? 0),
+    );
+    await _show(
+      AgentMessage('Claude', '${plan.summary} (about $total minutes in total)'),
+    );
+  }
+
   /// Replies to messages that aren't commands.
   Future<void> _converse(String said) async {
+    // With Claude connected, anything Aero doesn't understand goes to Claude.
+    if (_claude != null) {
+      await _askClaude(said);
+      return;
+    }
     final t = said.toLowerCase().replaceAll(RegExp(r"[^a-z0-9' ]"), '').trim();
     const smallTalk = {
       r'^how are (you|u)':
@@ -890,8 +997,7 @@ class _FloatingAgentState extends State<FloatingAgent>
       r'^(who|what) are (you|u)':
           "I'm your personal assistant. I keep your to-do list, remind you, "
           'watch DriveSync and keep an eye on your PC.',
-      r'^(what is|whats) your name':
-          "I'm Aero!",
+      r'^(what is|whats) your name': "I'm Aero!",
       r'^(good night|gn)': 'Good night! Sleep well.',
       r'^(i love you|love you)': "That's sweet! I'm always here for you.",
       r'^(ok|okay|cool|nice|great|good|fine|alright)$': '👍',

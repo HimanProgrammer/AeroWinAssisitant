@@ -7,6 +7,20 @@ String? understand(String raw) {
   var t = raw.trim();
   if (t.isEmpty) return null;
 
+  // Claude commands keep the user's exact words.
+  if (RegExp(
+    r'^\s*((set )?claude (api )?key|ask claude|claude[,:]?\s)',
+    caseSensitive: false,
+  ).hasMatch(t)) {
+    return raw.trim();
+  }
+  if (RegExp(
+    r'^\s*(plan|estimate|organi[sz]e|sort)\b.*\b(list|tasks?|to ?dos?|day)\b',
+    caseSensitive: false,
+  ).hasMatch(t)) {
+    return 'plan my list';
+  }
+
   // A file path (e.g. F:\New folder\drivesync) is handled as-is.
   if (RegExp(r'[A-Za-z]:\s*\\').hasMatch(t)) return raw;
 

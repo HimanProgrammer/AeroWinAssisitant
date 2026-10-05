@@ -26,6 +26,22 @@ words he hears.
 Apps and scripts can send the same commands with
 `POST /chat {"text": "..."}`.
 
+## Ask Claude
+Aero can ask Claude for answers and plans (Claude never runs anything on
+your PC). Get an API key at https://console.anthropic.com (billed
+separately from a Claude app subscription), then type in Aero's chat:
+
+```
+claude key sk-ant-...
+```
+
+The key is stored only on this PC. Then:
+
+- `ask claude <question>`: any question; messages Aero doesn't understand
+  also go to Claude
+- `plan my list`: Claude estimates minutes for each to-do task and puts
+  them in the best order
+
 ## Updates itself
 About 20 seconds after starting, and every 6 hours, the assistant checks
 the Releases page. When there's a new build he says so, downloads it,
