@@ -26,11 +26,14 @@ jobs:
       - name: Zip the app
         shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath Aero-windows.zip
+      # Create the release once, then only replace its files: this never
+      # edits or moves the tag (which this repo's token isn't allowed to do).
       - name: Publish on the Releases page
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Aero for Windows (latest)
-          make_latest: true
-          body: Built automatically from ${{ github.sha }}. Download Aero-windows.zip, Extract All, run aero.exe. Aero updates itself after that.
-          files: Aero-windows.zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest --repo ${{ github.repository }} >/dev/null 2>&1 ||
+            gh release create latest --repo ${{ github.repository }} --prerelease \
+              --title "Aero for Windows (latest)" --notes "Built automatically. Download Aero-windows.zip."
+          gh release upload latest Aero-windows.zip --clobber --repo ${{ github.repository }}

@@ -30,12 +30,14 @@ jobs:
       - run: flutter build apk --release --split-per-abi
       - run: cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk AeroAssistant.apk
       - run: ls -la AeroAssistant.apk
+      # Create the release once, then only replace its files: this never
+      # edits or moves the tag (which this repo's token isn't allowed to do).
       - name: Publish on the Releases page
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: android-latest
-          name: Aero for Android (latest)
-          prerelease: true
-          make_latest: false
-          body: Built automatically from ${{ github.sha }}. Open on your phone, tap AeroAssistant.apk, then Install.
-          files: AeroAssistant.apk
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-latest --repo ${{ github.repository }} >/dev/null 2>&1 ||
+            gh release create android-latest --repo ${{ github.repository }} --prerelease \
+              --title "Aero for Android (latest)" --notes "Built automatically. Download AeroAssistant.apk."
+          gh release upload android-latest AeroAssistant.apk --clobber --repo ${{ github.repository }}
