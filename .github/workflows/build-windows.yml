@@ -28,6 +28,5 @@ jobs:
           tag_name: latest
           name: Aero for Windows (latest)
           make_latest: true
-          target_commitish: ${{ github.sha }}
           body: Built automatically from ${{ github.sha }}. Download Aero-windows.zip, Extract All, run aero.exe. Aero updates itself after that.
           files: Aero-windows.zip
